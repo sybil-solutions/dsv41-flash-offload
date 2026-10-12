@@ -158,7 +158,7 @@ Notes:
 
 Image: `ghcr.io/0xsero/dsv41-flash-offload@sha256:c247bad773a3d31af7420d99ead6d1d521f20d50df4b6c346c26f80f5ca30cf3` (tag `d141-main`).
 - It was built from this repo at `2b60498` (D141) by local-ai-images run
-  [37115412498](https://github.com/0xSero/local-ai-images/actions/runs/37115412498).
+  [37115412498](https://github.com/sybil-solutions/local-ai-images/actions/runs/37115412498).
 - It carries a build attestation: `gh attestation verify oci://ghcr.io/0xsero/dsv41-flash-offload@sha256:c247bad773a3d31af7420d99ead6d1d521f20d50df4b6c346c26f80f5ca30cf3 -o 0xSero`.
 - To build it yourself instead: `docker build -f docker/Dockerfile -t dsv41-flash-offload .`
 
