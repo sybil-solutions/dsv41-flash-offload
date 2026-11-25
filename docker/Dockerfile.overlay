@@ -1,0 +1,13 @@
+# Thin overlay on the pinned D141 image: replaces only the entrypoint and adds the host-plan / CPU-topology helpers, so
+# a host with a different GPU / RAM split (e.g. RTX A6000 48 GB + 192 GB, docs/a6000-192gb.md) can serve without
+# rebuilding vLLM, exllamav3 or vllm-exl3. Every patched runtime file stays byte-identical to the attested image.
+#   docker build -f docker/Dockerfile.overlay -t dsv41-flash-offload:d141-a6000 .
+ARG BASE=ghcr.io/0xsero/dsv41-flash-offload@sha256:c247bad773a3d31af7420d99ead6d1d521f20d50df4b6c346c26f80f5ca30cf3
+FROM ${BASE}
+COPY docker/entrypoint.sh /opt/dsv41/docker/entrypoint.sh
+COPY pack/make_host_plan.py /opt/dsv41/pack/make_host_plan.py
+COPY scripts/ct_cpus.py /opt/dsv41/scripts/ct_cpus.py
+RUN chmod 0755 /opt/dsv41/docker/entrypoint.sh /opt/dsv41/pack/make_host_plan.py /opt/dsv41/scripts/ct_cpus.py \
+ && bash -n /opt/dsv41/docker/entrypoint.sh \
+ && python3 /opt/dsv41/pack/make_host_plan.py --vram-layers 0 --out /tmp/p.json \
+ && test "$(python3 /opt/dsv41/pack/make_host_plan.py --summary /tmp/p.json --field need_gb)" = 215 && rm /tmp/p.json

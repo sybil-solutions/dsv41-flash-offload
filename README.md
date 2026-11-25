@@ -153,6 +153,8 @@ Notes:
   (not measured).
 - Keep all inputs on local NVMe; the Engram rows are random 4 KiB-class reads.
 - Docker with the NVIDIA container toolkit, a driver that supports CUDA 13.0.
+- Bigger GPU, less RAM (e.g. RTX A6000 48 GB + 192 GB): keep whole MoE layers in VRAM with a separate host plan
+  (`pack/make_host_plan.py`, `EXL3_HOST_EXPERTS`). See [docs/a6000-192gb.md](docs/a6000-192gb.md) (not measured).
 
 ## Run
 

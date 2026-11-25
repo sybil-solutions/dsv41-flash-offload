@@ -119,23 +119,42 @@ if [ "$DSV41_CPU_TIER" = "1" ]; then
         grep -qw "$f" /proc/cpuinfo || die "CPU lacks $f; the CPU tier needs AVX2+FMA+F16C (or -e DSV41_CPU_TIER=0)"
     done
 fi
-NEED_GB=215   # measured: MemAvailable fell by 195-199 GiB from container start to ready (D030, D061, D107, D117)
+for f in config.json model.safetensors.index.json; do
+    [ -f "$PACK/$f" ] || die "no overlay pack at $PACK ($f missing); build it once with: docker run ... IMAGE prepare"
+done
+[ -f "$EXL3_HOST_EXPERTS" ] || die "host plan $EXL3_HOST_EXPERTS not found (EXL3_HOST_EXPERTS); default is $PACK/host-plan.json"
+# Host plan: layers with an empty expert list live entirely in VRAM (pack/make_host_plan.py). The CPU tier starts its
+# worker only once DSV41_CT_LAYERS host layers have registered, so it must equal the plan's host-layer count, otherwise
+# the tier never starts and every decode miss falls back to zero-copy PCIe reads.
+PLAN=$(python3 "$ROOT/pack/make_host_plan.py" --summary "$EXL3_HOST_EXPERTS") || die "cannot read host plan $EXL3_HOST_EXPERTS"
+plan_field() { python3 -c 'import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])' "$PLAN" "$1"; }
+[ "$(plan_field partial_layers)" = "0" ] || die "host plan has partially host-resident layers; the CPU tier and VRAM cache only support whole layers"
+export DSV41_CT_LAYERS=${DSV41_CT_LAYERS:-$(plan_field host_layers)}
+[ "$DSV41_CT_LAYERS" = "$(plan_field host_layers)" ] \
+    || log "WARNING: DSV41_CT_LAYERS=$DSV41_CT_LAYERS but the plan has $(plan_field host_layers) host layers; the CPU tier may never start"
+log "host plan $EXL3_HOST_EXPERTS: $PLAN"
+# CPU tier threads: one per physical core except the first two (the measured host's 2-23 / 22 rule), unless set.
+if [ "$DSV41_CPU_TIER" = "1" ] && [ -z "${DSV41_CT_CPUS:-}" ]; then
+    read -r CT_CPUS CT_N < <(python3 "$ROOT/scripts/ct_cpus.py" 2) || die "cannot detect CPU topology; set DSV41_CT_CPUS and DSV41_CT_THREADS"
+    export DSV41_CT_CPUS=$CT_CPUS DSV41_CT_THREADS=${DSV41_CT_THREADS:-$CT_N}
+fi
+[ "$DSV41_CPU_TIER" = "1" ] && log "CPU tier: ${DSV41_CT_THREADS:-22} threads on cpus ${DSV41_CT_CPUS:-2-23}"
+# measured: MemAvailable fell by 195-199 GiB from container start to ready (D030, D061, D107, D117) with all 40 layers
+# on the host -> 215 GiB. Scaled with the plan's pinned bytes (+24.5 GiB); DSV41_NEED_GB overrides.
+NEED_GB=${DSV41_NEED_GB:-$(plan_field need_gb)}
 AVAIL_GB=$(awk '/MemAvailable/{printf "%d", $2/1048576}' /proc/meminfo)
 if [ -r /sys/fs/cgroup/memory.max ] && [ "$(cat /sys/fs/cgroup/memory.max)" != "max" ]; then
     LIM_GB=$(( $(cat /sys/fs/cgroup/memory.max) / 1073741824 ))
     [ "$LIM_GB" -ge "$NEED_GB" ] || die "container memory limit ${LIM_GB} GiB < ~${NEED_GB} GiB needed (raise --memory)"
 fi
 [ "$AVAIL_GB" -ge "$NEED_GB" ] || log "WARNING: MemAvailable ${AVAIL_GB} GiB < ~${NEED_GB} GiB this configuration pins; expect OOM"
-for f in config.json host-plan.json model.safetensors.index.json; do
-    [ -f "$PACK/$f" ] || die "no overlay pack at $PACK ($f missing); build it once with: docker run ... IMAGE prepare"
-done
 [ -e "$PACK/model-00048-of-00048.safetensors" ] || die "$PACK does not resolve the Engram shards; mount the whole model root at $MODELS"
 log "host $(nproc) CPUs visible, MemAvailable ${AVAIL_GB} GiB, max-model-len $MAX_LEN, KV $KV_BYTES B, chunk $CHUNK"
 
 ARGS=("$PACK" --host 0.0.0.0 --port "$PORT" --tensor-parallel-size 1 --quantization exl3
       --served-model-name "${SERVED_NAME:-deepseek-v4.1-flash}" --max-logprobs -1
       --max-model-len "$MAX_LEN" --max-num-seqs 4 --max-num-batched-tokens "$CHUNK"
-      --kv-cache-dtype fp8 --kv-cache-memory "$KV_BYTES" --gpu-memory-utilization 0.90
+      --kv-cache-dtype fp8 --kv-cache-memory "$KV_BYTES" --gpu-memory-utilization "${DSV41_GPU_MEM_UTIL:-0.90}"
       --enable-prefix-caching --language-model-only --tokenizer-mode deepseek_v41 --trust-remote-code
       --disable-custom-all-reduce --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","custom_ops":["all"]}'
       --cudagraph-capture-sizes 1 2 4 6 8 12 16 24
