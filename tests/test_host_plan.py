@@ -62,6 +62,11 @@ class CtCpusTest(unittest.TestCase):
         topo = {c: (0, c % 24) for c in range(48)}
         self.assertEqual(ct.pick(set(range(48)), topo, 2), list(range(2, 24)))
 
+    def test_threadripper_7970x(self):
+        # 32 cores / 64 threads: cpu n and n+32 share core n -> 2..31, 30 threads
+        topo = {c: (0, c % 32) for c in range(64)}
+        self.assertEqual(ct.pick(set(range(64)), topo, 2), list(range(2, 32)))
+
     def test_16_core_desktop_and_cpuset(self):
         topo = {c: (0, c % 16) for c in range(32)}
         self.assertEqual(ct.pick(set(range(32)), topo, 2), list(range(2, 16)))
